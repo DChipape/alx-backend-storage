@@ -1,32 +1,38 @@
-import time
-import requests
+#!/usr/bin/env python3
+'''A module with tools for request caching and tracking.
+'''
 import redis
+import requests
+from functools import wraps
+from typing import Callable
 
-# Initialize Redis connection
-redis_conn = redis.StrictRedis(host='localhost', port=6379, db=0)
 
+redis_store = redis.Redis()
+'''The module-level Redis instance.
+'''
+
+
+def data_cacher(method: Callable) -> Callable:
+    '''Caches the output of fetched data.
+    '''
+    @wraps(method)
+    def invoker(url) -> str:
+        '''The wrapper function for caching the output.
+        '''
+        redis_store.incr(f'count:{url}')
+        result = redis_store.get(f'result:{url}')
+        if result:
+            return result.decode('utf-8')
+        result = method(url)
+        redis_store.set(f'count:{url}', 0)
+        redis_store.setex(f'result:{url}', 10, result)
+        return result
+    return invoker
+
+
+@data_cacher
 def get_page(url: str) -> str:
-    # Check if the URL content is cached
-    cached_content = redis_conn.get(url)
-    if cached_content:
-        # If cached content exists, return it
-        return cached_content.decode('utf-8')
-
-    # If not cached, fetch the content using requests
-    response = requests.get(url)
-    content = response.text
-
-    # Cache the content with an expiration time of 10 seconds
-    redis_conn.setex(url, 10, content)
-
-    # Increment the access count for the URL
-    url_count_key = f"count:{url}"
-    redis_conn.incr(url_count_key)
-
-    return content
-
-if __name__ == "__main__":
-    # Test the get_page function
-    url = "http://slowwly.robertomurray.co.uk"
-    print(get_page(url))
-
+    '''Returns the content of a URL after caching the request's response,
+    and tracking the request.
+    '''
+    return requests.get(url).text
